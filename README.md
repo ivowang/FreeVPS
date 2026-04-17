@@ -236,7 +236,7 @@ The installer converges the server to the target state in these phases:
 8. renders:
    - `/etc/proxy-issuer/settings.json`
    - `/etc/proxy-issuer/cloudflare.env`
-   - `/etc/sing-box/config.base.json`
+   - `/etc/proxy-issuer/config.base.json`
 9. installs:
    - `/root/proxy_issuer.py`
    - `/root/proxy-issuer`
@@ -274,7 +274,7 @@ Runtime paths after bootstrap:
 - `/var/lib/proxy-issuer/devices.db`
 - `/etc/proxy-issuer/settings.json`
 - `/etc/proxy-issuer/cloudflare.env`
-- `/etc/sing-box/config.base.json`
+- `/etc/proxy-issuer/config.base.json`
 - `/etc/sing-box/config.json`
 
 ## First Use After Install

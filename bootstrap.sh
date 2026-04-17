@@ -295,7 +295,7 @@ ensure_dns_records() {
 
 generate_reality_materials_if_needed() {
   local existing_settings="/etc/proxy-issuer/settings.json"
-  local existing_base="/etc/sing-box/config.base.json"
+  local existing_base="/etc/proxy-issuer/config.base.json"
 
   REALITY_SERVER_NAME="$(json_get "${existing_settings}" '.reality_server_name')"
   REALITY_SERVER_NAME="${REALITY_SERVER_NAME:-${DEFAULT_REALITY_SERVER_NAME}}"
@@ -385,7 +385,7 @@ install_runtime_files() {
 
   local rendered_base="${TMP_DIR}/config.base.json"
   render_base_config "${rendered_base}"
-  write_if_changed "${rendered_base}" "/etc/sing-box/config.base.json" 600
+  write_if_changed "${rendered_base}" "/etc/proxy-issuer/config.base.json" 600
 
   install -m 700 "${DEVICE_ISSUER_DIR}/proxy_issuer.py" /root/proxy_issuer.py
   install -m 755 "${DEVICE_ISSUER_DIR}/proxy-issuer" /root/proxy-issuer

@@ -467,7 +467,7 @@ SUPPORTED_CLIENT_TYPES = ("mihomo-desktop", "mihomo-server", "shadowrocket")
 class RuntimePaths:
     db_path: Path = Path("/var/lib/proxy-issuer/devices.db")
     settings_path: Path = Path("/etc/proxy-issuer/settings.json")
-    base_config_path: Path = Path("/etc/sing-box/config.base.json")
+    base_config_path: Path = Path("/etc/proxy-issuer/config.base.json")
     live_config_path: Path = Path("/etc/sing-box/config.json")
     cloudflare_env_path: Path = Path("/etc/proxy-issuer/cloudflare.env")
 

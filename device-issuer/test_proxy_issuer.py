@@ -337,10 +337,11 @@ class ConfigLoadTests(unittest.TestCase):
 
             self.assertEqual(proxy_issuer.load_settings(path), expected)
 
-    def test_runtime_paths_defaults_still_target_deployed_locations(self):
+    def test_runtime_paths_keep_base_config_outside_live_sing_box_config_dir(self):
         runtime = proxy_issuer.RuntimePaths()
 
-        self.assertEqual(runtime.base_config_path, Path("/etc/sing-box/config.base.json"))
+        self.assertEqual(runtime.base_config_path, Path("/etc/proxy-issuer/config.base.json"))
+        self.assertNotEqual(runtime.base_config_path.parent, runtime.live_config_path.parent)
         self.assertEqual(runtime.settings_path, Path("/etc/proxy-issuer/settings.json"))
         self.assertEqual(
             runtime.cloudflare_env_path, Path("/etc/proxy-issuer/cloudflare.env")

@@ -4,3 +4,4 @@ device-issuer/__pycache__/
 *.pyc
 subscription-worker/.wrangler/
 subscription-worker/wrangler.toml
+new_repo/
