@@ -1,4 +1,4 @@
-# Publishable Cloudflare + sing-box Proxy Bootstrap
+# FreeVPS
 
 This repository bootstraps a brand-new overseas Ubuntu server into a working proxy system with:
 
