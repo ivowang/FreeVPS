@@ -9,7 +9,7 @@ const SUBSCRIPTION_HOST = "sub.example.test";
 const LEGACY_TOKEN = "legacy-token";
 
 const CLASH_RULE_SAMPLE = "payload:\n  - DOMAIN-SUFFIX,example.com\n";
-const RULE_MIRRORS = {
+const CLASH_RULE_MIRRORS = {
   direct: [
     "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/direct.txt",
     "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/direct.txt",
@@ -19,8 +19,26 @@ const RULE_MIRRORS = {
     "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/cncidr.txt",
   ],
 };
+const SHADOWROCKET_RULE_MIRRORS = [
+  "https://raw.githubusercontent.com/Johnshall/Shadowrocket-ADBlock-Rules-Forever/release/sr_top500_whitelist_ad.conf",
+  "https://cdn.jsdelivr.net/gh/Johnshall/Shadowrocket-ADBlock-Rules-Forever@release/sr_top500_whitelist_ad.conf",
+];
+const SHADOWROCKET_RULE_SAMPLE = `
+[General]
+dns-server = https://dns.alidns.com/dns-query
 
-function createFetchStub({ clashRule = CLASH_RULE_SAMPLE, ruleResponses = {} } = {}) {
+[Rule]
+DOMAIN-SUFFIX,ads.example,Reject
+DOMAIN-SUFFIX,example.cn,Direct
+DOMAIN-SUFFIX,telegram.org,Proxy
+FINAL,PROXY
+`.trimStart();
+
+function createFetchStub({
+  clashRule = CLASH_RULE_SAMPLE,
+  shadowrocketRule = SHADOWROCKET_RULE_SAMPLE,
+  ruleResponses = {},
+} = {}) {
   const fetchStub = async (input) => {
     const url = typeof input === "string" ? input : input.url;
     if (url.includes("clash-rules")) {
@@ -40,6 +58,24 @@ function createFetchStub({ clashRule = CLASH_RULE_SAMPLE, ruleResponses = {} } =
       }
 
       return new Response(clashRule);
+    }
+    if (url.includes("Shadowrocket-ADBlock-Rules-Forever")) {
+      const configuredResponse = ruleResponses[url];
+      if (configuredResponse instanceof Error) {
+        throw configuredResponse;
+      }
+      if (configuredResponse !== undefined) {
+        if (typeof configuredResponse === "string") {
+          return new Response(configuredResponse);
+        }
+
+        return new Response(configuredResponse.body ?? "", {
+          status: configuredResponse.status ?? 200,
+          headers: configuredResponse.headers,
+        });
+      }
+
+      return new Response(shadowrocketRule);
     }
     return new Response("upstream unavailable", { status: 502 });
   };
@@ -207,7 +243,7 @@ test("rule responses strip upstream entity headers", async () => {
   const worker = await loadWorker(
     createFetchStub({
       ruleResponses: {
-        [RULE_MIRRORS.direct[0]]: {
+        [CLASH_RULE_MIRRORS.direct[0]]: {
           body: CLASH_RULE_SAMPLE,
           headers: {
             "content-length": "999",
@@ -235,22 +271,39 @@ test("rule responses strip upstream entity headers", async () => {
 
 test("shared shadowrocket rule paths transform upstream payloads", async () => {
   const worker = await loadWorker(
-    createFetchStub({ clashRule: "payload:\n  - '1.1.1.0/24'\n" }),
+    createFetchStub(),
   );
   const response = await worker.fetch(
-    new Request("https://sub.example.test/shadowrocket-rules/cncidr.list"),
+    new Request("https://sub.example.test/shadowrocket-rules/proxy.list"),
   );
 
   assert.equal(response.status, 200);
-  assert.equal(await response.text(), "IP-CIDR,1.1.1.0/24,no-resolve\n");
+  assert.equal(await response.text(), "DOMAIN-SUFFIX,telegram.org\n");
+});
+
+test("serves shared Shadowrocket module without device secrets", async () => {
+  const worker = await loadWorker(createFetchStub());
+  const response = await worker.fetch(
+    new Request("https://sub.example.test/shadowrocket/module.conf"),
+  );
+
+  assert.equal(response.status, 200);
+  const text = await response.text();
+  assert.match(text, /\[General\]/);
+  assert.match(text, /\[Rule\]/);
+  assert.match(text, /shadowrocket-rules\/reject\.list/);
+  assert.match(text, /shadowrocket-rules\/direct\.list/);
+  assert.match(text, /shadowrocket-rules\/proxy\.list/);
+  assert.doesNotMatch(text, /\[Proxy\]/);
+  assert.doesNotMatch(text, /323e4567-e89b-12d3-a456-426614174000/);
 });
 
 test("shadowrocket rule responses strip upstream entity headers after transformation", async () => {
   const worker = await loadWorker(
     createFetchStub({
       ruleResponses: {
-        [RULE_MIRRORS.cncidr[0]]: {
-          body: "payload:\n  - '1.1.1.0/24'\n",
+        [SHADOWROCKET_RULE_MIRRORS[0]]: {
+          body: SHADOWROCKET_RULE_SAMPLE,
           headers: {
             "content-length": "1234",
             "content-encoding": "gzip",
@@ -263,7 +316,7 @@ test("shadowrocket rule responses strip upstream entity headers after transforma
   );
 
   const response = await worker.fetch(
-    new Request("https://sub.example.test/shadowrocket-rules/cncidr.list"),
+    new Request("https://sub.example.test/shadowrocket-rules/reject.list"),
   );
 
   assert.equal(response.status, 200);
@@ -273,14 +326,15 @@ test("shadowrocket rule responses strip upstream entity headers after transforma
   assert.equal(response.headers.get("content-encoding"), null);
   assert.equal(response.headers.get("etag"), null);
   assert.equal(response.headers.get("last-modified"), null);
+  assert.equal(await response.text(), "DOMAIN-SUFFIX,ads.example\n");
 });
 
 test("rule fetch retries the second mirror when the first mirror throws", async () => {
   const worker = await loadWorker(
     createFetchStub({
       ruleResponses: {
-        [RULE_MIRRORS.direct[0]]: new Error("mirror 1 failed"),
-        [RULE_MIRRORS.direct[1]]: "payload:\n  - DOMAIN,example.org\n",
+        [CLASH_RULE_MIRRORS.direct[0]]: new Error("mirror 1 failed"),
+        [CLASH_RULE_MIRRORS.direct[1]]: "payload:\n  - DOMAIN,example.org\n",
       },
     }),
   );
@@ -295,8 +349,8 @@ test("rule fetch returns 502 when all mirrors throw", async () => {
   const worker = await loadWorker(
     createFetchStub({
       ruleResponses: {
-        [RULE_MIRRORS.direct[0]]: new Error("mirror 1 failed"),
-        [RULE_MIRRORS.direct[1]]: new Error("mirror 2 failed"),
+        [CLASH_RULE_MIRRORS.direct[0]]: new Error("mirror 1 failed"),
+        [CLASH_RULE_MIRRORS.direct[1]]: new Error("mirror 2 failed"),
       },
     }),
   );
@@ -304,6 +358,24 @@ test("rule fetch returns 502 when all mirrors throw", async () => {
   const response = await worker.fetch(new Request("https://sub.example.test/rules/direct.txt"));
 
   assert.equal(response.status, 502);
+});
+
+test("shadowrocket rule fetch retries the second Johnshall mirror when the first mirror throws", async () => {
+  const worker = await loadWorker(
+    createFetchStub({
+      ruleResponses: {
+        [SHADOWROCKET_RULE_MIRRORS[0]]: new Error("mirror 1 failed"),
+        [SHADOWROCKET_RULE_MIRRORS[1]]: SHADOWROCKET_RULE_SAMPLE,
+      },
+    }),
+  );
+
+  const response = await worker.fetch(
+    new Request("https://sub.example.test/shadowrocket-rules/direct.list"),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "DOMAIN-SUFFIX,example.cn\n");
 });
 
 test("subscription error logging redacts token context", async () => {

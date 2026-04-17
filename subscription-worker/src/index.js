@@ -11,6 +11,7 @@ const RULES = {
   lancidr: { behavior: "ipcidr" },
   applications: { behavior: "classical" },
 };
+const SHADOWROCKET_RULE_BUCKETS = new Set(["reject", "direct", "proxy"]);
 
 function notFound() {
   return new Response("Not found", {
@@ -55,6 +56,10 @@ function shadowrocketRulePathName(pathname) {
   return match ? match[1] : null;
 }
 
+function shadowrocketModulePath(pathname) {
+  return pathname === "/shadowrocket/module.conf";
+}
+
 function upstreamUrls(name) {
   return [
     `https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/${name}.txt`,
@@ -62,8 +67,15 @@ function upstreamUrls(name) {
   ];
 }
 
-async function fetchUpstreamRuleText(name) {
-  for (const url of upstreamUrls(name)) {
+function shadowrocketUpstreamUrls() {
+  return [
+    "https://raw.githubusercontent.com/Johnshall/Shadowrocket-ADBlock-Rules-Forever/release/sr_top500_whitelist_ad.conf",
+    "https://cdn.jsdelivr.net/gh/Johnshall/Shadowrocket-ADBlock-Rules-Forever@release/sr_top500_whitelist_ad.conf",
+  ];
+}
+
+async function fetchFirstSuccessfulText(urls, label) {
+  for (const url of urls) {
     let response;
     try {
       response = await fetch(url, {
@@ -76,7 +88,7 @@ async function fetchUpstreamRuleText(name) {
         },
       });
     } catch (error) {
-      console.error(`Rule mirror fetch threw for ${name}: ${url}`, error);
+      console.error(`Rule mirror fetch threw for ${label}: ${url}`, error);
       continue;
     }
 
@@ -91,6 +103,14 @@ async function fetchUpstreamRuleText(name) {
   }
 
   return null;
+}
+
+async function fetchUpstreamRuleText(name) {
+  return fetchFirstSuccessfulText(upstreamUrls(name), name);
+}
+
+async function fetchShadowrocketUpstreamText() {
+  return fetchFirstSuccessfulText(shadowrocketUpstreamUrls(), "shadowrocket");
 }
 
 function ruleUnavailable() {
@@ -143,38 +163,117 @@ function validateSubscriptionRecord(subscription) {
   return subscription;
 }
 
-function unwrapPayloadEntries(text) {
-  const normalized = text.replace(/\r\n/g, "\n");
-  return normalized
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => line !== "payload:")
-    .map((line) => line.replace(/^- /, ""))
-    .map((line) => {
-      const match = line.match(/^(['"])(.*)\1$/);
-      return match ? match[2] : line;
-    });
+function normalizeShadowrocketPolicy(token) {
+  switch (token.trim().toLowerCase()) {
+    case "reject":
+      return "reject";
+    case "direct":
+      return "direct";
+    case "proxy":
+      return "proxy";
+    default:
+      return null;
+  }
 }
 
-function convertPayloadYamlToShadowrocketList(text, behavior) {
-  const entries = unwrapPayloadEntries(text);
-  if (behavior === "ipcidr") {
-    return `${entries.map((entry) => `IP-CIDR,${entry},no-resolve`).join("\n")}\n`;
+function extractShadowrocketRuleSection(text) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const section = [];
+  let inRuleSection = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (/^\[[^\]]+\]$/.test(line)) {
+      if (inRuleSection) {
+        break;
+      }
+      inRuleSection = line.toLowerCase() === "[rule]";
+      continue;
+    }
+
+    if (inRuleSection) {
+      section.push(line);
+    }
   }
 
-  return `${entries.join("\n")}\n`;
+  return section;
+}
+
+function splitShadowrocketRuleBuckets(text) {
+  const buckets = {
+    reject: [],
+    direct: [],
+    proxy: [],
+  };
+
+  for (const line of extractShadowrocketRuleSection(text)) {
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+
+    const parts = line.split(",").map((part) => part.trim()).filter(Boolean);
+    if (parts.length < 2) {
+      continue;
+    }
+
+    if (parts[0].toUpperCase() === "FINAL" || parts[0].toUpperCase() === "RULE-SET") {
+      continue;
+    }
+
+    let bucket = null;
+    let policyIndex = -1;
+    for (let index = parts.length - 1; index >= 1; index -= 1) {
+      bucket = normalizeShadowrocketPolicy(parts[index]);
+      if (bucket) {
+        policyIndex = index;
+        break;
+      }
+    }
+
+    if (!bucket || policyIndex <= 0) {
+      continue;
+    }
+
+    buckets[bucket].push(parts.slice(0, policyIndex).join(","));
+  }
+
+  return buckets;
 }
 
 async function fetchShadowrocketRuleSet(name) {
-  const upstream = await fetchUpstreamRuleText(name);
+  const upstream = await fetchShadowrocketUpstreamText();
   if (!upstream) {
     return ruleUnavailable();
   }
 
-  return buildRuleResponse(
-    convertPayloadYamlToShadowrocketList(upstream.text, RULES[name].behavior),
-  );
+  const bucket = splitShadowrocketRuleBuckets(upstream.text)[name] ?? [];
+  return buildRuleResponse(bucket.length ? `${bucket.join("\n")}\n` : "");
+}
+
+function renderShadowrocketModule(origin) {
+  return [
+    "[General]",
+    "ipv6 = true",
+    "bypass-system = true",
+    "private-ip-answer = true",
+    "skip-proxy = 192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,127.0.0.0/8,localhost,*.local",
+    "",
+    "[Rule]",
+    `RULE-SET,${origin}/shadowrocket-rules/reject.list,REJECT`,
+    `RULE-SET,${origin}/shadowrocket-rules/direct.list,DIRECT`,
+    `RULE-SET,${origin}/shadowrocket-rules/proxy.list,PROXY`,
+    "DOMAIN-SUFFIX,cn,DIRECT",
+    "GEOIP,CN,DIRECT",
+    "IP-CIDR,192.168.0.0/16,DIRECT",
+    "IP-CIDR,10.0.0.0/8,DIRECT",
+    "IP-CIDR,172.16.0.0/12,DIRECT",
+    "IP-CIDR,127.0.0.0/8,DIRECT",
+    "IP-CIDR,fe80::/10,DIRECT",
+    "IP-CIDR,fc00::/7,DIRECT",
+    "IP-CIDR,::1/128,DIRECT",
+    "FINAL,PROXY",
+    "",
+  ].join("\n");
 }
 
 async function loadSubscription(env, token) {
@@ -217,6 +316,16 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    if (shadowrocketModulePath(url.pathname)) {
+      return new Response(renderShadowrocketModule(url.origin), {
+        status: 200,
+        headers: {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "public, max-age=300",
+        },
+      });
+    }
+
     const token = subscriptionPathToken(url.pathname);
     if (token) {
       try {
@@ -245,7 +354,7 @@ export default {
 
     const shadowrocketRuleName = shadowrocketRulePathName(url.pathname);
     if (shadowrocketRuleName) {
-      if (RULES[shadowrocketRuleName]) {
+      if (SHADOWROCKET_RULE_BUCKETS.has(shadowrocketRuleName)) {
         return fetchShadowrocketRuleSet(shadowrocketRuleName);
       }
       return notFound();

@@ -1,4 +1,4 @@
-# FreeVPS
+# Publishable Cloudflare + sing-box Proxy Bootstrap
 
 This repository bootstraps a brand-new overseas Ubuntu server into a working proxy system with:
 
@@ -77,6 +77,17 @@ The Worker proxies shared rule endpoints:
 
 - `/rules/<name>.txt`
 - `/shadowrocket-rules/<name>.list`
+
+Rule-source details:
+
+- `mihomo` rule providers proxy `Loyalsoldier/clash-rules` through `/rules/*.txt`
+- `Shadowrocket` does not embed the full upstream `.conf`
+- instead, the Worker extracts the `[Rule]` section from `Johnshall/Shadowrocket-ADBlock-Rules-Forever` and republishes three remote buckets:
+  - `/shadowrocket-rules/reject.list`
+  - `/shadowrocket-rules/direct.list`
+  - `/shadowrocket-rules/proxy.list`
+- those shared buckets are consumed by a shared Shadowrocket module endpoint:
+  - `/shadowrocket/module.conf`
 
 ## Supported Target Environment
 
@@ -289,6 +300,21 @@ Create devices manually:
 /root/proxy-issuer issue shadowrocket my-phone
 ```
 
+For `shadowrocket`, the command output includes:
+
+- `subscription_url`
+  the device-specific node subscription
+- `module_url`
+  the shared Shadowrocket module URL
+
+Shadowrocket import flow:
+
+1. Import the device-specific node subscription.
+2. Import the shared module from `/shadowrocket/module.conf`.
+3. Use the imported nodes together with the module rules.
+
+Revoking or rotating a Shadowrocket device invalidates the node subscription only. The shared module URL stays stable.
+
 List all devices:
 
 ```bash
@@ -335,9 +361,10 @@ Includes:
 
 Includes:
 
-- native Shadowrocket config format
-- same nodes
+- device-specific native node subscription
+- shared module URL for `[General]` and `[Rule]`
 - `Johnshall`-based rule layer through Worker-hosted rule lists
+- no embedded local-node `[Proxy]` config inside a monolithic `shadowrocket.conf`
 
 ## Idempotence Expectations
 

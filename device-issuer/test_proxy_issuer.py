@@ -382,24 +382,48 @@ class RendererTests(unittest.TestCase):
         self.assertIn("https://sub.example.com/rules/proxy.txt", rendered)
         self.assertIn("MATCH,PROXY", rendered)
 
-    def test_render_shadowrocket_contains_sections_credentials_and_shared_rules(self):
-        rendered = proxy_issuer.render_shadowrocket(
+    def test_render_shadowrocket_nodes_contains_only_native_nodes(self):
+        rendered, content_type = proxy_issuer.render_shadowrocket_nodes(
             SHADOWROCKET_DEVICE, SAMPLE_SETTINGS
         )
 
-        self.assertIn("[General]", rendered)
-        self.assertIn("ipv6 = true", rendered)
-        self.assertIn("[Proxy Group]", rendered)
-        self.assertIn("AUTO = url-test", rendered)
+        self.assertEqual(content_type, "text/plain; charset=utf-8")
+        self.assertIn("vless://", rendered)
+        self.assertIn("hysteria2://", rendered)
         self.assertIn(SHADOWROCKET_DEVICE["vless_uuid"], rendered)
         self.assertIn(SHADOWROCKET_DEVICE["hy2_password"], rendered)
         self.assertIn(SHADOWROCKET_DEVICE["hy2_obfs_password"], rendered)
+        self.assertNotIn("[General]", rendered)
+        self.assertNotIn("[Rule]", rendered)
+        self.assertNotIn("[Proxy]", rendered)
+        self.assertNotIn("RULE-SET,", rendered)
+
+    def test_render_shadowrocket_module_contains_rules_but_no_credentials(self):
+        rendered, content_type = proxy_issuer.render_shadowrocket_module(
+            SAMPLE_SETTINGS
+        )
+
+        self.assertEqual(content_type, "text/plain; charset=utf-8")
+        self.assertIn("[General]", rendered)
+        self.assertIn("[Rule]", rendered)
+        self.assertIn("ipv6 = true", rendered)
         self.assertIn(
             "RULE-SET,https://sub.example.com/shadowrocket-rules/reject.list,REJECT",
             rendered,
         )
-        self.assertIn("IP-CIDR,192.168.0.0/16,DIRECT", rendered)
+        self.assertIn(
+            "RULE-SET,https://sub.example.com/shadowrocket-rules/direct.list,DIRECT",
+            rendered,
+        )
+        self.assertIn(
+            "RULE-SET,https://sub.example.com/shadowrocket-rules/proxy.list,PROXY",
+            rendered,
+        )
         self.assertIn("FINAL,PROXY", rendered)
+        self.assertNotIn("[Proxy]", rendered)
+        self.assertNotIn(SHADOWROCKET_DEVICE["vless_uuid"], rendered)
+        self.assertNotIn(SHADOWROCKET_DEVICE["hy2_password"], rendered)
+        self.assertNotIn(SHADOWROCKET_DEVICE["hy2_obfs_password"], rendered)
 
     def test_render_subscription_dispatches_content_type_by_client(self):
         desktop_content, desktop_content_type = proxy_issuer.render_subscription(
@@ -411,11 +435,18 @@ class RendererTests(unittest.TestCase):
 
         self.assertIn("mixed-port: 7890", desktop_content)
         self.assertEqual(desktop_content_type, "text/yaml; charset=utf-8")
-        self.assertIn("[General]", shadowrocket_content)
+        self.assertIn("vless://", shadowrocket_content)
+        self.assertNotIn("[General]", shadowrocket_content)
         self.assertEqual(
             shadowrocket_content_type,
             "text/plain; charset=utf-8",
         )
+
+    def test_format_device_output_adds_shared_module_url_for_shadowrocket(self):
+        rendered = proxy_issuer.format_device_output(SHADOWROCKET_DEVICE, SAMPLE_SETTINGS)
+
+        self.assertIn("subscription_url: https://sub.example.com/s/phone-token", rendered)
+        self.assertIn("module_url: https://sub.example.com/shadowrocket/module.conf", rendered)
 
 
 class ConfigGenerationTests(unittest.TestCase):

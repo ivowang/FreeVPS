@@ -5,6 +5,7 @@ import secrets
 import sqlite3
 import subprocess
 import tempfile
+import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
@@ -112,15 +113,8 @@ MIHOMO_RULES = [
 
 SHADOWROCKET_REMOTE_RULES = [
     ("reject", "REJECT"),
-    ("private", "DIRECT"),
-    ("icloud", "DIRECT"),
-    ("apple", "DIRECT"),
-    ("google", "PROXY"),
-    ("proxy", "PROXY"),
     ("direct", "DIRECT"),
-    ("lancidr", "DIRECT"),
-    ("cncidr", "DIRECT"),
-    ("telegramcidr", "PROXY"),
+    ("proxy", "PROXY"),
 ]
 
 SHADOWROCKET_PRIVATE_RULES = [
@@ -363,7 +357,54 @@ def render_mihomo_server(device, settings):
     return "\n\n".join(sections) + "\n"
 
 
-def render_shadowrocket(device, settings):
+def build_shadowrocket_module_url(settings):
+    base_url = settings["subscription_base_url"].rstrip("/")
+    if base_url.endswith("/s"):
+        base_url = base_url[:-2]
+    return f"{base_url}/shadowrocket/module.conf"
+
+
+def build_shadowrocket_vless_uri(device, settings):
+    query = urllib.parse.urlencode(
+        {
+            "encryption": "none",
+            "flow": "xtls-rprx-vision",
+            "security": "reality",
+            "sni": settings["reality_server_name"],
+            "fp": "chrome",
+            "pbk": settings["reality_public_key"],
+            "sid": settings["reality_short_id"],
+            "type": "tcp",
+            "headerType": "none",
+        }
+    )
+    name = urllib.parse.quote("SG VLESS Reality", safe="")
+    return f"vless://{device['vless_uuid']}@{settings['proxy_server']}:443?{query}#{name}"
+
+
+def build_shadowrocket_hy2_uri(device, settings):
+    query = urllib.parse.urlencode(
+        {
+            "obfs": "salamander",
+            "obfs-password": device["hy2_obfs_password"],
+            "sni": settings["hysteria2_sni"],
+            "insecure": "0",
+        }
+    )
+    password = urllib.parse.quote(device["hy2_password"], safe="")
+    name = urllib.parse.quote("SG Hysteria2", safe="")
+    return f"hysteria2://{password}@{settings['proxy_server']}:443/?{query}#{name}"
+
+
+def render_shadowrocket_nodes(device, settings):
+    lines = [
+        build_shadowrocket_vless_uri(device, settings),
+        build_shadowrocket_hy2_uri(device, settings),
+    ]
+    return "\n".join(lines) + "\n", "text/plain; charset=utf-8"
+
+
+def render_shadowrocket_module(settings):
     base_url = settings["shadowrocket_rule_base_url"]
     remote_rules = "\n".join(
         f"RULE-SET,{base_url}/{name}.list,{policy}"
@@ -377,29 +418,12 @@ def render_shadowrocket(device, settings):
             ipv6 = true
             bypass-system = true
             private-ip-answer = true
-            dns-direct-fallback-proxy = true
-            dns-server = https://dns.alidns.com/dns-query, https://doh.pub/dns-query, https://1.1.1.1/dns-query, 223.5.5.5, 119.29.29.29
-            fallback-dns-server = system
             skip-proxy = 192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,127.0.0.0/8,localhost,*.local
-            """
-        ).rstrip(),
-        dedent(
-            f"""\
-            [Proxy]
-            SG VLESS Reality = vless, {settings["proxy_server"]}, 443, username={device["vless_uuid"]}, tls=true, sni={settings["reality_server_name"]}, flow=xtls-rprx-vision, udp-relay=true, client-fingerprint=chrome, reality-public-key={settings["reality_public_key"]}, reality-short-id={settings["reality_short_id"]}
-            SG Hysteria2 = hysteria2, {settings["proxy_server"]}, 443, password={device["hy2_password"]}, sni={settings["hysteria2_sni"]}, obfs=salamander, obfs-password={device["hy2_obfs_password"]}, alpn={",".join(settings["hysteria2_alpn"])}, udp-relay=true
-            """
-        ).rstrip(),
-        dedent(
-            """\
-            [Proxy Group]
-            AUTO = url-test, SG VLESS Reality, SG Hysteria2, url=http://www.gstatic.com/generate_204, interval=300
-            PROXY = select, AUTO, SG VLESS Reality, SG Hysteria2, DIRECT
             """
         ).rstrip(),
         "\n".join(["[Rule]", remote_rules, private_rules, "FINAL,PROXY"]).rstrip(),
     ]
-    return "\n\n".join(sections) + "\n"
+    return "\n\n".join(sections) + "\n", "text/plain; charset=utf-8"
 
 
 def render_subscription(device, settings):
@@ -409,7 +433,7 @@ def render_subscription(device, settings):
     if client_type == "mihomo-server":
         return render_mihomo_server(device, settings), "text/yaml; charset=utf-8"
     if client_type == "shadowrocket":
-        return render_shadowrocket(device, settings), "text/plain; charset=utf-8"
+        return render_shadowrocket_nodes(device, settings)
     raise ValueError(f"Unsupported client_type: {client_type}")
 
 
@@ -898,15 +922,16 @@ def list_devices(runtime):
 
 
 def format_device_output(device, settings):
-    return "\n".join(
-        [
-            f"device_id: {device['device_id']}",
-            f"device_name: {device['device_name']}",
-            f"client_type: {device['client_type']}",
-            f"subscription_url: {build_subscription_url(settings, device['subscription_token'])}",
-            f"status: {device['status']}",
-        ]
-    )
+    lines = [
+        f"device_id: {device['device_id']}",
+        f"device_name: {device['device_name']}",
+        f"client_type: {device['client_type']}",
+        f"subscription_url: {build_subscription_url(settings, device['subscription_token'])}",
+        f"status: {device['status']}",
+    ]
+    if device["client_type"] == "shadowrocket":
+        lines.append(f"module_url: {build_shadowrocket_module_url(settings)}")
+    return "\n".join(lines)
 
 
 def format_device_table(devices, settings):
