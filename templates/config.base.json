@@ -1,0 +1,68 @@
+{
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "tag": "vless-reality-in",
+      "type": "vless",
+      "listen": "::",
+      "listen_port": 443,
+      "users": [],
+      "tls": {
+        "enabled": true,
+        "server_name": "www.microsoft.com",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "www.microsoft.com",
+            "server_port": 443
+          },
+          "private_key": "BOOTSTRAP_RENDERS_REALITY_PRIVATE_KEY",
+          "short_id": [
+            "BOOTSTRAP_RENDERS_REALITY_SHORT_ID"
+          ],
+          "max_time_difference": "1m"
+        }
+      }
+    },
+    {
+      "tag": "hy2-in",
+      "type": "hysteria2",
+      "listen": "::",
+      "listen_port": 443,
+      "users": [],
+      "ignore_client_bandwidth": true,
+      "masquerade": "https://www.apple.com",
+      "obfs": {
+        "type": "salamander",
+        "password": "BOOTSTRAP_RENDERS_HY2_OBFS_PASSWORD"
+      },
+      "tls": {
+        "enabled": true,
+        "server_name": "BOOTSTRAP_RENDERS_PROXY_HOST",
+        "alpn": [
+          "h3"
+        ],
+        "acme": {
+          "domain": [
+            "BOOTSTRAP_RENDERS_PROXY_HOST"
+          ],
+          "default_server_name": "BOOTSTRAP_RENDERS_PROXY_HOST",
+          "data_directory": "/var/lib/sing-box/acme",
+          "dns01_challenge": {
+            "provider": "cloudflare",
+            "api_token": "BOOTSTRAP_RENDERS_DNS_API_TOKEN"
+          }
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ]
+}

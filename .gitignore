@@ -1,0 +1,6 @@
+.DS_Store
+__pycache__/
+device-issuer/__pycache__/
+*.pyc
+subscription-worker/.wrangler/
+subscription-worker/wrangler.toml
